@@ -264,3 +264,102 @@ export const fileUploadSchema = Joi.object({
   size: Joi.number().integer().max(5 * 1024 * 1024 * 1024).required(), // 5GB max
   buffer: Joi.binary().required()
 });
+
+// Deployment Service validation schemas
+export const resourceRequirementsSchema = Joi.object({
+  cpu: Joi.string().pattern(/^\d+(\.\d+)?m?$/).required(),
+  memory: Joi.string().pattern(/^\d+(\.\d+)?(Mi|Gi|Ti)?$/).required(),
+  gpu: Joi.string().optional()
+});
+
+export const healthCheckConfigurationSchema = Joi.object({
+  path: Joi.string().required(),
+  port: Joi.number().integer().min(1).max(65535).required(),
+  initialDelaySeconds: Joi.number().integer().min(0).default(30),
+  periodSeconds: Joi.number().integer().min(1).default(10),
+  timeoutSeconds: Joi.number().integer().min(1).default(5),
+  failureThreshold: Joi.number().integer().min(1).default(3)
+});
+
+export const rolloutPolicySchema = Joi.object({
+  maxUnavailable: Joi.string().pattern(/^\d+%?$/).default('25%'),
+  maxSurge: Joi.string().pattern(/^\d+%?$/).default('25%'),
+  progressDeadlineSeconds: Joi.number().integer().min(60).default(600)
+});
+
+export const deploymentConfigurationSchema = Joi.object({
+  replicas: Joi.number().integer().min(1).max(100).required(),
+  resources: resourceRequirementsSchema.required(),
+  environment: Joi.object().pattern(Joi.string(), Joi.string()).default({}),
+  healthCheck: healthCheckConfigurationSchema.required(),
+  rolloutPolicy: rolloutPolicySchema.required()
+});
+
+export const sloTargetsSchema = Joi.object({
+  availability: Joi.number().min(0).max(100).required(),
+  latencyP95: Joi.number().integer().min(0).required(),
+  latencyP99: Joi.number().integer().min(0).required(),
+  errorRate: Joi.number().min(0).max(100).required()
+});
+
+export const driftThresholdsSchema = Joi.object({
+  inputDrift: Joi.number().min(0).max(1).required(),
+  outputDrift: Joi.number().min(0).max(1).required(),
+  performanceDrift: Joi.number().min(0).max(1).required()
+});
+
+export const createDeploymentSchema = Joi.object({
+  versionId: Joi.string().uuid().required(),
+  environment: Joi.string().valid('staging', 'production', 'canary').required(),
+  strategy: Joi.string().valid('blue_green', 'canary', 'rolling').required(),
+  configuration: deploymentConfigurationSchema.required(),
+  sloTargets: sloTargetsSchema.required(),
+  driftThresholds: driftThresholdsSchema.required()
+});
+
+export const updateDeploymentSchema = Joi.object({
+  configuration: deploymentConfigurationSchema.optional(),
+  sloTargets: sloTargetsSchema.optional(),
+  driftThresholds: driftThresholdsSchema.optional()
+});
+
+export const createTrafficSplitSchema = Joi.object({
+  percentage: Joi.number().integer().min(0).max(100).required()
+});
+
+export const createRollbackSchema = Joi.object({
+  targetVersionId: Joi.string().uuid().required(),
+  reason: Joi.string().min(10).max(1000).required()
+});
+
+export const deploymentQuerySchema = Joi.object({
+  environment: Joi.string().valid('staging', 'production', 'canary').optional(),
+  status: Joi.string().valid(
+    'pending', 'deploying', 'active', 'failed', 
+    'rolling_back', 'rolled_back', 'terminated'
+  ).optional(),
+  versionId: Joi.string().uuid().optional(),
+  deployedBy: Joi.string().uuid().optional(),
+  startDate: Joi.date().optional(),
+  endDate: Joi.date().optional(),
+  limit: Joi.number().integer().min(1).max(100).default(20),
+  offset: Joi.number().integer().min(0).default(0)
+});
+
+export const metricsQuerySchema = Joi.object({
+  startTime: Joi.date().required(),
+  endTime: Joi.date().greater(Joi.ref('startTime')).required(),
+  granularity: Joi.string().valid('minute', 'hour', 'day').optional()
+});
+
+export const recordMetricsSchema = Joi.object({
+  timestamp: Joi.date().default(() => new Date()),
+  availability: Joi.number().min(0).max(100).required(),
+  latencyP95: Joi.number().integer().min(0).required(),
+  latencyP99: Joi.number().integer().min(0).required(),
+  errorRate: Joi.number().min(0).max(100).required(),
+  inputDrift: Joi.number().min(0).max(1).optional(),
+  outputDrift: Joi.number().min(0).max(1).optional(),
+  performanceDrift: Joi.number().min(0).max(1).optional(),
+  requestCount: Joi.number().integer().min(0).default(0)
+});

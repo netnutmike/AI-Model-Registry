@@ -135,23 +135,23 @@
     - Integration tests for evaluation job execution
     - _Requirements: 6.1, 6.2_
 
-- [ ] 7. Develop Deployment Service
+- [x] 7. Develop Deployment Service
 
-  - [ ] 7.1 Implement deployment management APIs
+  - [x] 7.1 Implement deployment management APIs
 
     - Create deployment CRUD operations
     - Implement canary deployment configuration
     - Add traffic splitting and routing logic
     - _Requirements: 4.1, 4.3_
 
-  - [ ] 7.2 Build rollback and monitoring capabilities
+  - [x] 7.2 Build rollback and monitoring capabilities
 
     - Implement one-click rollback functionality
     - Create SLO monitoring and alerting
     - Add drift detection and threshold monitoring
     - _Requirements: 4.2, 4.5_
 
-  - [ ] 7.3 Write Deployment Service tests
+  - [x] 7.3 Write Deployment Service tests
     - Unit tests for deployment logic and rollback mechanisms
     - Integration tests for monitoring and alerting
     - _Requirements: 4.1, 4.2_

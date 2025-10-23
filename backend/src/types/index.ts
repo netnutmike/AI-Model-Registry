@@ -544,6 +544,237 @@ export interface EvaluationJobEntity extends Omit<EvaluationJob, 'versionId' | '
   error_message?: string;
 }
 
+// Deployment Service types
+export interface Deployment {
+  id: string;
+  versionId: string;
+  environment: DeploymentEnvironment;
+  status: DeploymentStatus;
+  strategy: DeploymentStrategy;
+  configuration: DeploymentConfiguration;
+  trafficSplit?: TrafficSplit;
+  sloTargets: SLOTargets;
+  driftThresholds: DriftThresholds;
+  deployedBy: string;
+  deployedAt: Date;
+  updatedAt: Date;
+}
+
+export interface DeploymentConfiguration {
+  replicas: number;
+  resources: ResourceRequirements;
+  environment: Record<string, string>;
+  healthCheck: HealthCheckConfiguration;
+  rolloutPolicy: RolloutPolicy;
+}
+
+export interface ResourceRequirements {
+  cpu: string;
+  memory: string;
+  gpu?: string;
+}
+
+export interface HealthCheckConfiguration {
+  path: string;
+  port: number;
+  initialDelaySeconds: number;
+  periodSeconds: number;
+  timeoutSeconds: number;
+  failureThreshold: number;
+}
+
+export interface RolloutPolicy {
+  maxUnavailable: string;
+  maxSurge: string;
+  progressDeadlineSeconds: number;
+}
+
+export interface TrafficSplit {
+  id: string;
+  deploymentId: string;
+  percentage: number;
+  startedAt: Date;
+  completedAt?: Date;
+}
+
+export interface SLOTargets {
+  availability: number; // percentage (e.g., 99.9)
+  latencyP95: number; // milliseconds
+  latencyP99: number; // milliseconds
+  errorRate: number; // percentage
+}
+
+export interface DriftThresholds {
+  inputDrift: number;
+  outputDrift: number;
+  performanceDrift: number;
+}
+
+export interface DeploymentMetrics {
+  id: string;
+  deploymentId: string;
+  timestamp: Date;
+  availability: number;
+  latencyP95: number;
+  latencyP99: number;
+  errorRate: number;
+  inputDrift?: number;
+  outputDrift?: number;
+  performanceDrift?: number;
+  requestCount: number;
+}
+
+export interface DeploymentAlert {
+  id: string;
+  deploymentId: string;
+  type: AlertType;
+  severity: AlertSeverity;
+  message: string;
+  threshold: number;
+  actualValue: number;
+  triggeredAt: Date;
+  resolvedAt?: Date;
+  acknowledged: boolean;
+}
+
+export interface RollbackOperation {
+  id: string;
+  deploymentId: string;
+  targetVersionId: string;
+  reason: string;
+  status: RollbackStatus;
+  initiatedBy: string;
+  initiatedAt: Date;
+  completedAt?: Date;
+  errorMessage?: string;
+}
+
+// Deployment Service enums
+export enum DeploymentEnvironment {
+  STAGING = 'staging',
+  PRODUCTION = 'production',
+  CANARY = 'canary'
+}
+
+export enum DeploymentStatus {
+  PENDING = 'pending',
+  DEPLOYING = 'deploying',
+  ACTIVE = 'active',
+  FAILED = 'failed',
+  ROLLING_BACK = 'rolling_back',
+  ROLLED_BACK = 'rolled_back',
+  TERMINATED = 'terminated'
+}
+
+export enum DeploymentStrategy {
+  BLUE_GREEN = 'blue_green',
+  CANARY = 'canary',
+  ROLLING = 'rolling'
+}
+
+export enum AlertType {
+  SLO_BREACH = 'slo_breach',
+  DRIFT_DETECTED = 'drift_detected',
+  HIGH_ERROR_RATE = 'high_error_rate',
+  HIGH_LATENCY = 'high_latency',
+  LOW_AVAILABILITY = 'low_availability'
+}
+
+export enum AlertSeverity {
+  INFO = 'info',
+  WARNING = 'warning',
+  CRITICAL = 'critical'
+}
+
+export enum RollbackStatus {
+  PENDING = 'pending',
+  IN_PROGRESS = 'in_progress',
+  COMPLETED = 'completed',
+  FAILED = 'failed'
+}
+
+// Deployment API Request/Response types
+export interface CreateDeploymentRequest {
+  versionId: string;
+  environment: DeploymentEnvironment;
+  strategy: DeploymentStrategy;
+  configuration: DeploymentConfiguration;
+  sloTargets: SLOTargets;
+  driftThresholds: DriftThresholds;
+}
+
+export interface UpdateDeploymentRequest {
+  configuration?: Partial<DeploymentConfiguration>;
+  sloTargets?: Partial<SLOTargets>;
+  driftThresholds?: Partial<DriftThresholds>;
+}
+
+export interface CreateTrafficSplitRequest {
+  deploymentId: string;
+  percentage: number;
+}
+
+export interface CreateRollbackRequest {
+  targetVersionId: string;
+  reason: string;
+}
+
+export interface DeploymentQuery {
+  environment?: DeploymentEnvironment;
+  status?: DeploymentStatus;
+  versionId?: string;
+  deployedBy?: string;
+  startDate?: Date;
+  endDate?: Date;
+  limit?: number;
+  offset?: number;
+}
+
+export interface MetricsQuery {
+  deploymentId: string;
+  startTime: Date;
+  endTime: Date;
+  granularity?: 'minute' | 'hour' | 'day';
+}
+
+// Deployment database entity types
+export interface DeploymentEntity extends Omit<Deployment, 'versionId' | 'deployedBy' | 'deployedAt' | 'updatedAt'> {
+  version_id: string;
+  deployed_by: string;
+  deployed_at: Date;
+  updated_at: Date;
+}
+
+export interface TrafficSplitEntity extends Omit<TrafficSplit, 'deploymentId' | 'startedAt' | 'completedAt'> {
+  deployment_id: string;
+  started_at: Date;
+  completed_at?: Date;
+}
+
+export interface DeploymentMetricsEntity extends Omit<DeploymentMetrics, 'deploymentId' | 'inputDrift' | 'outputDrift' | 'performanceDrift' | 'requestCount'> {
+  deployment_id: string;
+  input_drift?: number;
+  output_drift?: number;
+  performance_drift?: number;
+  request_count: number;
+}
+
+export interface DeploymentAlertEntity extends Omit<DeploymentAlert, 'deploymentId' | 'actualValue' | 'triggeredAt' | 'resolvedAt'> {
+  deployment_id: string;
+  actual_value: number;
+  triggered_at: Date;
+  resolved_at?: Date;
+}
+
+export interface RollbackOperationEntity extends Omit<RollbackOperation, 'deploymentId' | 'targetVersionId' | 'initiatedBy' | 'initiatedAt' | 'completedAt' | 'errorMessage'> {
+  deployment_id: string;
+  target_version_id: string;
+  initiated_by: string;
+  initiated_at: Date;
+  completed_at?: Date;
+  error_message?: string;
+}
+
 // User database entity types
 export interface UserEntity extends Omit<User, 'createdAt' | 'updatedAt'> {
   created_at: Date;
