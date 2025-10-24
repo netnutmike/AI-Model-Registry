@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "ai-model-registry.fullname" . }}-config
+  labels:
+    {{- include "ai-model-registry.labels" . | nindent 4 }}
+data:
+  # Database configuration
+  {{- if .Values.postgresql.external.enabled }}
+  DATABASE_HOST: {{ .Values.postgresql.external.host | quote }}
+  DATABASE_PORT: {{ .Values.postgresql.external.port | quote }}
+  DATABASE_NAME: {{ .Values.postgresql.external.database | quote }}
+  DATABASE_USER: {{ .Values.postgresql.external.username | quote }}
+  {{- end }}
+  
+  # Redis configuration
+  {{- if .Values.redis.external.enabled }}
+  REDIS_HOST: {{ .Values.redis.external.host | quote }}
+  REDIS_PORT: {{ .Values.redis.external.port | quote }}
+  {{- end }}
+  
+  # S3 configuration
+  S3_BUCKET: {{ .Values.s3.bucket | quote }}
+  S3_REGION: {{ .Values.s3.region | quote }}
+  
+  # Service URLs
+  AUTH_SERVICE_URL: "http://{{ include "ai-model-registry.fullname" . }}-auth:{{ .Values.backend.auth.service.port }}"
+  MODEL_REGISTRY_SERVICE_URL: "http://{{ include "ai-model-registry.fullname" . }}-model-registry:{{ .Values.backend.modelRegistry.service.port }}"
+  POLICY_ENGINE_SERVICE_URL: "http://{{ include "ai-model-registry.fullname" . }}-policy-engine:{{ .Values.backend.policyEngine.service.port }}"
+  EVALUATION_SERVICE_URL: "http://{{ include "ai-model-registry.fullname" . }}-evaluation:{{ .Values.backend.evaluation.service.port }}"
+  DEPLOYMENT_SERVICE_URL: "http://{{ include "ai-model-registry.fullname" . }}-deployment:{{ .Values.backend.deployment.service.port }}"
+  AUDIT_SERVICE_URL: "http://{{ include "ai-model-registry.fullname" . }}-audit:{{ .Values.backend.audit.service.port }}"
+  
+  # Monitoring configuration
+  {{- if .Values.monitoring.jaeger.enabled }}
+  JAEGER_AGENT_HOST: {{ .Values.monitoring.jaeger.agent.host | quote }}
+  JAEGER_AGENT_PORT: {{ .Values.monitoring.jaeger.agent.port | quote }}
+  {{- end }}
+  
+  # Environment
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"

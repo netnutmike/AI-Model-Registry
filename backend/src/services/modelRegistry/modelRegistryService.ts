@@ -15,6 +15,8 @@ import {
 } from '../../types/index.js';
 import { LineageService, LineageGraph } from './lineageService.js';
 import { ModelCardService, ModelCard } from './modelCardService.js';
+import { getCacheService, CacheService } from '../cache/index.js';
+import { CACHE_KEYS, CACHE_TTL } from '../../config/redis.js';
 import crypto from 'crypto';
 
 export interface ModelSearchFilters {
@@ -42,10 +44,12 @@ export interface ArtifactUploadInfo {
 export class ModelRegistryService {
   private lineageService: LineageService;
   private modelCardService: ModelCardService;
+  private cache: CacheService;
 
   constructor(private db: DatabaseService) {
     this.lineageService = new LineageService(db);
     this.modelCardService = new ModelCardService(db);
+    this.cache = getCacheService();
   }
 
   /**
@@ -77,7 +81,18 @@ export class ModelRegistryService {
       const result = await this.db.query(query, values);
       const modelEntity = result.rows[0] as ModelEntity;
       
-      return this.mapModelEntityToModel(modelEntity);
+      // Invalidate search cache
+      await this.cache.invalidateByTags(['model-search']);
+      
+      const model = this.mapModelEntityToModel(modelEntity);
+      
+      // Cache the new model
+      await this.cache.set(CACHE_KEYS.MODEL(modelId), model, { 
+        ttl: CACHE_TTL.MODEL, 
+        tags: [`model:${modelId}`, `group:${request.group}`] 
+      });
+      
+      return model;
     } catch (error: any) {
       if (error.code === '23505') { // Unique constraint violation
         throw new Error(`Model ${request.group}/${request.name} already exists`);
@@ -90,34 +105,69 @@ export class ModelRegistryService {
    * Get model by ID
    */
   async getModelById(modelId: string): Promise<Model | null> {
-    const query = 'SELECT * FROM models WHERE id = $1';
-    const result = await this.db.query(query, [modelId]);
+    const cacheKey = CACHE_KEYS.MODEL(modelId);
     
-    if (result.rows.length === 0) {
-      return null;
-    }
-    
-    return this.mapModelEntityToModel(result.rows[0] as ModelEntity);
+    return this.cache.getOrSet(
+      cacheKey,
+      async () => {
+        const query = 'SELECT * FROM models WHERE id = $1';
+        const result = await this.db.query(query, [modelId]);
+        
+        if (result.rows.length === 0) {
+          return null;
+        }
+        
+        return this.mapModelEntityToModel(result.rows[0] as ModelEntity);
+      },
+      { ttl: CACHE_TTL.MODEL, tags: [`model:${modelId}`] }
+    );
   }
 
   /**
    * Get model by group and name
    */
   async getModelByGroupAndName(group: string, name: string): Promise<Model | null> {
-    const query = 'SELECT * FROM models WHERE "group" = $1 AND name = $2';
-    const result = await this.db.query(query, [group, name]);
+    const cacheKey = `model:group:${group}:name:${name}`;
     
-    if (result.rows.length === 0) {
-      return null;
-    }
-    
-    return this.mapModelEntityToModel(result.rows[0] as ModelEntity);
+    return this.cache.getOrSet(
+      cacheKey,
+      async () => {
+        const query = 'SELECT * FROM models WHERE "group" = $1 AND name = $2';
+        const result = await this.db.query(query, [group, name]);
+        
+        if (result.rows.length === 0) {
+          return null;
+        }
+        
+        return this.mapModelEntityToModel(result.rows[0] as ModelEntity);
+      },
+      { ttl: CACHE_TTL.MODEL, tags: [`group:${group}`] }
+    );
   }
 
   /**
    * Search and filter models with pagination
    */
   async searchModels(
+    filters: ModelSearchFilters = {}, 
+    page: number = 1, 
+    pageSize: number = 20
+  ): Promise<ModelSearchResult> {
+    // Create cache key from search parameters
+    const searchKey = JSON.stringify({ filters, page, pageSize });
+    const cacheKey = CACHE_KEYS.MODEL_SEARCH('', searchKey);
+    
+    return this.cache.getOrSet(
+      cacheKey,
+      async () => this.performModelSearch(filters, page, pageSize),
+      { ttl: CACHE_TTL.MODEL_SEARCH, tags: ['model-search'] }
+    );
+  }
+
+  /**
+   * Perform the actual model search (extracted for caching)
+   */
+  private async performModelSearch(
     filters: ModelSearchFilters = {}, 
     page: number = 1, 
     pageSize: number = 20

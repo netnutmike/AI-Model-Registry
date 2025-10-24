@@ -89,4 +89,17 @@ export class DatabaseService {
       waitingCount: this.pool.waitingCount,
     };
   }
+
+  /**
+   * Health check for database connectivity
+   */
+  async healthCheck(): Promise<void> {
+    try {
+      const client = await this.pool.connect();
+      await client.query('SELECT 1');
+      client.release();
+    } catch (error) {
+      throw new Error(`Database health check failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
 }

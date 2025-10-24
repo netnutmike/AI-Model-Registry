@@ -1,0 +1,13 @@
+# Trivy ignore file for known false positives or accepted risks
+
+# Example: Ignore specific CVE that has been assessed as low risk
+# CVE-2021-44228
+
+# Ignore low severity vulnerabilities in development dependencies
+# These should be reviewed periodically but don't block builds
+
+# Node.js base image vulnerabilities that are patched in newer versions
+# Update base images regularly to address these
+
+# Development-only dependencies with known issues
+# These don't affect production builds but may show up in scans

@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-model-registry
+  labels:
+    name: ai-model-registry
+    app.kubernetes.io/name: ai-model-registry
+    app.kubernetes.io/instance: ai-model-registry

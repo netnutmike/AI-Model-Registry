@@ -785,3 +785,327 @@ export interface UserSessionEntity extends Omit<UserSession, 'userId' | 'created
   user_id: string;
   created_at: Date;
 }
+
+// Audit Service types
+export interface AuditLog {
+  id: string;
+  eventType: string;
+  entityType: string;
+  entityId: string;
+  userId?: string;
+  sessionId?: string;
+  action: string;
+  details: Record<string, any>;
+  metadata: Record<string, any>;
+  ipAddress?: string;
+  userAgent?: string;
+  previousHash?: string;
+  currentHash: string;
+  timestamp: Date;
+}
+
+export interface EvidenceBundle {
+  id: string;
+  name: string;
+  description?: string;
+  bundleType: EvidenceBundleType;
+  status: EvidenceBundleStatus;
+  queryCriteria: Record<string, any>;
+  filePath?: string;
+  fileSize?: number;
+  fileHash?: string;
+  expiresAt?: Date;
+  generatedBy: string;
+  generatedAt: Date;
+  completedAt?: Date;
+  errorMessage?: string;
+}
+
+export interface DataRetentionPolicy {
+  id: string;
+  name: string;
+  description?: string;
+  entityType: string;
+  retentionPeriodDays: number;
+  deletionCriteria: Record<string, any>;
+  isActive: boolean;
+  createdBy: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface DataSubjectRequest {
+  id: string;
+  requestType: DataSubjectRequestType;
+  subjectIdentifier: string;
+  subjectType: string;
+  status: DataSubjectRequestStatus;
+  justification?: string;
+  requestedBy: string;
+  requestedAt: Date;
+  processedBy?: string;
+  processedAt?: Date;
+  completionDetails?: Record<string, any>;
+}
+
+export interface PersonalDataInventory {
+  id: string;
+  tableName: string;
+  columnName: string;
+  dataCategory: DataCategory;
+  sensitivityLevel: SensitivityLevel;
+  legalBasis?: string;
+  retentionPolicyId?: string;
+  pseudonymizationMethod?: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface HashChainState {
+  id: string;
+  chainName: string;
+  lastHash: string;
+  lastSequenceNumber: number;
+  updatedAt: Date;
+}
+
+export interface ComplianceReport {
+  id: string;
+  reportType: string;
+  title: string;
+  description?: string;
+  reportingPeriodStart: Date;
+  reportingPeriodEnd: Date;
+  status: ComplianceReportStatus;
+  templateVersion?: string;
+  generatedBy: string;
+  reviewedBy?: string;
+  approvedBy?: string;
+  filePath?: string;
+  fileSize?: number;
+  fileHash?: string;
+  createdAt: Date;
+  generatedAt?: Date;
+  reviewedAt?: Date;
+  approvedAt?: Date;
+}
+
+export interface AuditEventType {
+  eventType: string;
+  description: string;
+  entityTypes: string[];
+  requiredFields: string[];
+  retentionDays: number;
+  isActive: boolean;
+  createdAt: Date;
+}
+
+export interface HashChainIntegrityResult {
+  isValid: boolean;
+  totalRecords: number;
+  invalidRecords: number;
+  firstInvalidId?: string;
+  errorMessage: string;
+}
+
+// Audit Service enums
+export enum EvidenceBundleType {
+  COMPLIANCE_REPORT = 'compliance_report',
+  AUDIT_TRAIL = 'audit_trail',
+  INVESTIGATION = 'investigation'
+}
+
+export enum EvidenceBundleStatus {
+  GENERATING = 'generating',
+  READY = 'ready',
+  EXPIRED = 'expired',
+  ERROR = 'error'
+}
+
+export enum DataSubjectRequestType {
+  ACCESS = 'access',
+  DELETION = 'deletion',
+  RECTIFICATION = 'rectification',
+  PORTABILITY = 'portability'
+}
+
+export enum DataSubjectRequestStatus {
+  PENDING = 'pending',
+  PROCESSING = 'processing',
+  COMPLETED = 'completed',
+  REJECTED = 'rejected'
+}
+
+export enum DataCategory {
+  IDENTITY = 'identity',
+  CONTACT = 'contact',
+  BEHAVIORAL = 'behavioral',
+  TECHNICAL = 'technical'
+}
+
+export enum SensitivityLevel {
+  LOW = 'low',
+  MEDIUM = 'medium',
+  HIGH = 'high',
+  CRITICAL = 'critical'
+}
+
+export enum ComplianceReportStatus {
+  DRAFT = 'draft',
+  GENERATING = 'generating',
+  READY = 'ready',
+  ARCHIVED = 'archived'
+}
+
+// Audit API Request/Response types
+export interface CreateAuditLogRequest {
+  eventType: string;
+  entityType: string;
+  entityId: string;
+  action: string;
+  details?: Record<string, any>;
+  metadata?: Record<string, any>;
+}
+
+export interface CreateEvidenceBundleRequest {
+  name: string;
+  description?: string;
+  bundleType: EvidenceBundleType;
+  queryCriteria: Record<string, any>;
+  expiresAt?: Date;
+}
+
+export interface CreateDataRetentionPolicyRequest {
+  name: string;
+  description?: string;
+  entityType: string;
+  retentionPeriodDays: number;
+  deletionCriteria?: Record<string, any>;
+}
+
+export interface CreateDataSubjectRequestRequest {
+  requestType: DataSubjectRequestType;
+  subjectIdentifier: string;
+  subjectType: string;
+  justification?: string;
+}
+
+export interface CreateComplianceReportRequest {
+  reportType: string;
+  title: string;
+  description?: string;
+  reportingPeriodStart: Date;
+  reportingPeriodEnd: Date;
+  templateVersion?: string;
+}
+
+export interface AuditLogQuery {
+  eventType?: string;
+  entityType?: string;
+  entityId?: string;
+  userId?: string;
+  action?: string;
+  startDate?: Date;
+  endDate?: Date;
+  limit?: number;
+  offset?: number;
+}
+
+export interface VerifyIntegrityRequest {
+  startTimestamp?: Date;
+  endTimestamp?: Date;
+}
+
+// Audit database entity types
+export interface AuditLogEntity extends Omit<AuditLog, 'eventType' | 'entityType' | 'entityId' | 'userId' | 'sessionId' | 'ipAddress' | 'userAgent' | 'previousHash' | 'currentHash'> {
+  event_type: string;
+  entity_type: string;
+  entity_id: string;
+  user_id?: string;
+  session_id?: string;
+  ip_address?: string;
+  user_agent?: string;
+  previous_hash?: string;
+  current_hash: string;
+}
+
+export interface EvidenceBundleEntity extends Omit<EvidenceBundle, 'bundleType' | 'queryCriteria' | 'filePath' | 'fileSize' | 'fileHash' | 'expiresAt' | 'generatedBy' | 'generatedAt' | 'completedAt' | 'errorMessage'> {
+  bundle_type: string;
+  query_criteria: any;
+  file_path?: string;
+  file_size?: number;
+  file_hash?: string;
+  expires_at?: Date;
+  generated_by: string;
+  generated_at: Date;
+  completed_at?: Date;
+  error_message?: string;
+}
+
+export interface DataRetentionPolicyEntity extends Omit<DataRetentionPolicy, 'entityType' | 'retentionPeriodDays' | 'deletionCriteria' | 'isActive' | 'createdBy' | 'createdAt' | 'updatedAt'> {
+  entity_type: string;
+  retention_period_days: number;
+  deletion_criteria: any;
+  is_active: boolean;
+  created_by: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface DataSubjectRequestEntity extends Omit<DataSubjectRequest, 'requestType' | 'subjectIdentifier' | 'subjectType' | 'requestedBy' | 'requestedAt' | 'processedBy' | 'processedAt' | 'completionDetails'> {
+  request_type: string;
+  subject_identifier: string;
+  subject_type: string;
+  requested_by: string;
+  requested_at: Date;
+  processed_by?: string;
+  processed_at?: Date;
+  completion_details?: any;
+}
+
+export interface PersonalDataInventoryEntity extends Omit<PersonalDataInventory, 'tableName' | 'columnName' | 'dataCategory' | 'sensitivityLevel' | 'legalBasis' | 'retentionPolicyId' | 'pseudonymizationMethod' | 'isActive' | 'createdAt' | 'updatedAt'> {
+  table_name: string;
+  column_name: string;
+  data_category: string;
+  sensitivity_level: string;
+  legal_basis?: string;
+  retention_policy_id?: string;
+  pseudonymization_method?: string;
+  is_active: boolean;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface HashChainStateEntity extends Omit<HashChainState, 'chainName' | 'lastHash' | 'lastSequenceNumber' | 'updatedAt'> {
+  chain_name: string;
+  last_hash: string;
+  last_sequence_number: number;
+  updated_at: Date;
+}
+
+export interface ComplianceReportEntity extends Omit<ComplianceReport, 'reportType' | 'reportingPeriodStart' | 'reportingPeriodEnd' | 'templateVersion' | 'generatedBy' | 'reviewedBy' | 'approvedBy' | 'filePath' | 'fileSize' | 'fileHash' | 'createdAt' | 'generatedAt' | 'reviewedAt' | 'approvedAt'> {
+  report_type: string;
+  reporting_period_start: Date;
+  reporting_period_end: Date;
+  template_version?: string;
+  generated_by: string;
+  reviewed_by?: string;
+  approved_by?: string;
+  file_path?: string;
+  file_size?: number;
+  file_hash?: string;
+  created_at: Date;
+  generated_at?: Date;
+  reviewed_at?: Date;
+  approved_at?: Date;
+}
+
+export interface AuditEventTypeEntity extends Omit<AuditEventType, 'eventType' | 'entityTypes' | 'requiredFields' | 'retentionDays' | 'isActive' | 'createdAt'> {
+  event_type: string;
+  entity_types: string[];
+  required_fields: string[];
+  retention_days: number;
+  is_active: boolean;
+  created_at: Date;
+}

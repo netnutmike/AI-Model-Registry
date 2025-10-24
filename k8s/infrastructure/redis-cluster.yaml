@@ -1,0 +1,229 @@
+# Redis Cluster Configuration
+# This is a CloudFormation template for AWS ElastiCache Redis
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ElastiCache Redis cluster for AI Model Registry'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [development, staging, production]
+    Description: Environment name
+  
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where the cluster will be deployed
+  
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnet IDs for the Redis cluster
+  
+  NodeType:
+    Type: String
+    Default: cache.r6g.large
+    AllowedValues:
+      - cache.r6g.large
+      - cache.r6g.xlarge
+      - cache.r6g.2xlarge
+      - cache.r6g.4xlarge
+    Description: Node type for Redis instances
+  
+  NumCacheNodes:
+    Type: Number
+    Default: 3
+    MinValue: 3
+    MaxValue: 6
+    Description: Number of cache nodes in the cluster
+  
+  RedisVersion:
+    Type: String
+    Default: '7.0'
+    AllowedValues: ['6.2', '7.0']
+    Description: Redis engine version
+
+Resources:
+  # Cache Subnet Group
+  CacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      Description: Subnet group for Redis cluster
+      SubnetIds: !Ref PrivateSubnetIds
+      CacheSubnetGroupName: !Sub '${AWS::StackName}-redis-subnet-group'
+
+  # Security Group for Redis Cluster
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Redis cluster
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          SourceSecurityGroupId: !Ref ApplicationSecurityGroup
+          Description: Redis access from application
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-redis-sg'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Security Group for Applications
+  ApplicationSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for applications accessing Redis
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-app-sg'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Parameter Group for Redis
+  RedisParameterGroup:
+    Type: AWS::ElastiCache::ParameterGroup
+    Properties:
+      CacheParameterGroupFamily: redis7.x
+      Description: Parameter group for Redis cluster
+      Properties:
+        maxmemory-policy: allkeys-lru
+        timeout: 300
+        tcp-keepalive: 300
+        maxclients: 10000
+
+  # Redis Replication Group (Cluster Mode Enabled)
+  RedisReplicationGroup:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      ReplicationGroupId: !Sub '${AWS::StackName}-redis-cluster'
+      Description: Redis cluster for AI Model Registry
+      Engine: redis
+      EngineVersion: !Ref RedisVersion
+      CacheNodeType: !Ref NodeType
+      NumCacheClusters: !Ref NumCacheNodes
+      Port: 6379
+      CacheParameterGroupName: !Ref RedisParameterGroup
+      CacheSubnetGroupName: !Ref CacheSubnetGroup
+      SecurityGroupIds:
+        - !Ref RedisSecurityGroup
+      PreferredMaintenanceWindow: 'sun:03:00-sun:04:00'
+      SnapshotRetentionLimit: 7
+      SnapshotWindow: '02:00-03:00'
+      AutomaticFailoverEnabled: true
+      MultiAZEnabled: true
+      AtRestEncryptionEnabled: true
+      TransitEncryptionEnabled: true
+      AuthToken: !Ref RedisAuthToken
+      LogDeliveryConfigurations:
+        - DestinationType: cloudwatch-logs
+          DestinationDetails:
+            LogGroup: !Ref RedisLogGroup
+          LogFormat: json
+          LogType: slow-log
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-redis-cluster'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Auth Token for Redis
+  RedisAuthToken:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${AWS::StackName}-redis-auth-token'
+      Description: Auth token for Redis cluster
+      GenerateSecretString:
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\'
+        RequireEachIncludedType: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-redis-secret'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # CloudWatch Log Group for Redis
+  RedisLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/elasticache/${AWS::StackName}-redis'
+      RetentionInDays: 14
+
+  # CloudWatch Alarms
+  RedisHighCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-redis-high-cpu'
+      AlarmDescription: Redis cluster high CPU utilization
+      MetricName: CPUUtilization
+      Namespace: AWS/ElastiCache
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: CacheClusterId
+          Value: !Ref RedisReplicationGroup
+      TreatMissingData: notBreaching
+
+  RedisHighMemoryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-redis-high-memory'
+      AlarmDescription: Redis cluster high memory utilization
+      MetricName: DatabaseMemoryUsagePercentage
+      Namespace: AWS/ElastiCache
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: CacheClusterId
+          Value: !Ref RedisReplicationGroup
+      TreatMissingData: notBreaching
+
+  RedisHighConnectionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-redis-high-connections'
+      AlarmDescription: Redis cluster high connection count
+      MetricName: CurrConnections
+      Namespace: AWS/ElastiCache
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 8000
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: CacheClusterId
+          Value: !Ref RedisReplicationGroup
+      TreatMissingData: notBreaching
+
+Outputs:
+  RedisEndpoint:
+    Description: Redis cluster endpoint
+    Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}-redis-endpoint'
+  
+  RedisPort:
+    Description: Redis cluster port
+    Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Port
+    Export:
+      Name: !Sub '${AWS::StackName}-redis-port'
+  
+  RedisAuthTokenArn:
+    Description: Redis auth token secret ARN
+    Value: !Ref RedisAuthToken
+    Export:
+      Name: !Sub '${AWS::StackName}-redis-auth-token-arn'
+  
+  ApplicationSecurityGroupId:
+    Description: Security group ID for applications
+    Value: !Ref ApplicationSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-redis-app-sg-id'

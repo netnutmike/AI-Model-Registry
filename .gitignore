@@ -89,6 +89,10 @@ jspm_packages/
 .out
 .storybook-out
 
+# Secrets
+k8s/manifests/secrets.yaml
+
+
 # Temporary folders
 tmp/
 temp/

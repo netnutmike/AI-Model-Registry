@@ -3,25 +3,45 @@ import { getPool } from '../config/database.js';
 
 export class DatabaseService {
   private pool: Pool;
+  private queryMetrics: Map<string, { count: number; totalTime: number; avgTime: number }>;
 
   constructor() {
     this.pool = getPool();
+    this.queryMetrics = new Map();
   }
 
   /**
    * Execute a query with parameters
    */
   async query<T = any>(text: string, params?: any[]): Promise<T[]> {
-    const result = await this.pool.query(text, params);
-    return result.rows;
+    const startTime = Date.now();
+    const queryHash = this.hashQuery(text);
+    
+    try {
+      const result = await this.pool.query(text, params);
+      this.recordQueryMetrics(queryHash, Date.now() - startTime);
+      return result.rows;
+    } catch (error) {
+      this.recordQueryMetrics(queryHash, Date.now() - startTime, true);
+      throw error;
+    }
   }
 
   /**
    * Execute a query and return a single row
    */
   async queryOne<T = any>(text: string, params?: any[]): Promise<T | null> {
-    const result = await this.pool.query(text, params);
-    return result.rows[0] || null;
+    const startTime = Date.now();
+    const queryHash = this.hashQuery(text);
+    
+    try {
+      const result = await this.pool.query(text, params);
+      this.recordQueryMetrics(queryHash, Date.now() - startTime);
+      return result.rows[0] || null;
+    } catch (error) {
+      this.recordQueryMetrics(queryHash, Date.now() - startTime, true);
+      throw error;
+    }
   }
 
   /**
@@ -77,6 +97,108 @@ export class DatabaseService {
         status: 'unhealthy',
         timestamp: new Date()
       };
+    }
+  }
+
+  /**
+   * Hash query for metrics tracking
+   */
+  private hashQuery(query: string): string {
+    // Simple hash function for query identification
+    let hash = 0;
+    const normalizedQuery = query.replace(/\$\d+/g, '$?').replace(/\s+/g, ' ').trim();
+    
+    for (let i = 0; i < normalizedQuery.length; i++) {
+      const char = normalizedQuery.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    
+    return hash.toString();
+  }
+
+  /**
+   * Record query performance metrics
+   */
+  private recordQueryMetrics(queryHash: string, executionTime: number, isError: boolean = false): void {
+    if (isError) return; // Don't record metrics for failed queries
+    
+    const existing = this.queryMetrics.get(queryHash);
+    if (existing) {
+      existing.count++;
+      existing.totalTime += executionTime;
+      existing.avgTime = existing.totalTime / existing.count;
+    } else {
+      this.queryMetrics.set(queryHash, {
+        count: 1,
+        totalTime: executionTime,
+        avgTime: executionTime
+      });
+    }
+  }
+
+  /**
+   * Get query performance metrics
+   */
+  getQueryMetrics(): Array<{ queryHash: string; count: number; avgTime: number; totalTime: number }> {
+    return Array.from(this.queryMetrics.entries()).map(([queryHash, metrics]) => ({
+      queryHash,
+      ...metrics
+    }));
+  }
+
+  /**
+   * Reset query metrics
+   */
+  resetQueryMetrics(): void {
+    this.queryMetrics.clear();
+  }
+
+  /**
+   * Execute query with caching support
+   */
+  async queryCached<T = any>(
+    text: string, 
+    params: any[] = [], 
+    cacheKey?: string, 
+    ttl: number = 300
+  ): Promise<T[]> {
+    if (!cacheKey) {
+      return this.query<T>(text, params);
+    }
+
+    // Import cache service dynamically to avoid circular dependencies
+    const { getCacheService } = await import('../services/cache/index.js');
+    const cache = getCacheService();
+    
+    return cache.getOrSet(
+      cacheKey,
+      () => this.query<T>(text, params),
+      { ttl }
+    );
+  }
+
+  /**
+   * Prepare and execute optimized queries with connection reuse
+   */
+  async preparedQuery<T = any>(
+    name: string,
+    text: string,
+    params: any[] = []
+  ): Promise<T[]> {
+    const client = await this.pool.connect();
+    
+    try {
+      // Use prepared statements for better performance
+      const result = await client.query({
+        name,
+        text,
+        values: params
+      });
+      
+      return result.rows;
+    } finally {
+      client.release();
     }
   }
 }

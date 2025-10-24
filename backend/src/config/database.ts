@@ -37,11 +37,22 @@ export function createConnectionPool(): Pool {
     password: config.password,
     ssl: config.ssl ? { rejectUnauthorized: false } : false,
     max: config.maxConnections,
+    min: Math.floor(config.maxConnections * 0.1), // Maintain 10% minimum connections
     idleTimeoutMillis: config.idleTimeoutMillis,
     connectionTimeoutMillis: config.connectionTimeoutMillis,
+    acquireTimeoutMillis: 60000, // 60 seconds to acquire connection
+    createTimeoutMillis: 30000, // 30 seconds to create connection
+    destroyTimeoutMillis: 5000, // 5 seconds to destroy connection
+    reapIntervalMillis: 1000, // Check for idle connections every second
+    createRetryIntervalMillis: 200, // Retry connection creation every 200ms
     // Aurora-specific optimizations
     keepAlive: true,
     keepAliveInitialDelayMillis: 10000,
+    // Query optimization
+    statement_timeout: 30000, // 30 second query timeout
+    query_timeout: 30000,
+    // Application name for monitoring
+    application_name: 'ai-model-registry'
   };
 
   const pool = new Pool(poolConfig);

@@ -1,66 +1,59 @@
-import express from 'express'
-import cors from 'cors'
-import helmet from 'helmet'
-import compression from 'compression'
-import morgan from 'morgan'
-import dotenv from 'dotenv'
+import dotenv from 'dotenv';
+import { APIGateway } from './gateway/apiGateway.js';
+import { gatewayConfig, microserviceConfig } from './gateway/config.js';
+import { createMicroserviceApp } from './microservices/index.js';
 
 // Load environment variables
-dotenv.config()
+dotenv.config();
 
-const app = express()
-const PORT = process.env.PORT || 8000
+const DEPLOYMENT_MODE = process.env.DEPLOYMENT_MODE || 'monolith'; // 'monolith' or 'microservices'
 
-// Middleware
-app.use(helmet())
-app.use(cors())
-app.use(compression())
-app.use(morgan('combined'))
-app.use(express.json({ limit: '10mb' }))
-app.use(express.urlencoded({ extended: true }))
+async function startApplication() {
+  if (DEPLOYMENT_MODE === 'microservices') {
+    // Start API Gateway for microservices deployment
+    console.log('🚀 Starting in microservices mode');
+    
+    const gateway = new APIGateway(gatewayConfig);
+    gateway.start();
+    
+    console.log(`🌐 API Gateway running on port ${gatewayConfig.port}`);
+    console.log(`📊 Gateway health check: http://localhost:${gatewayConfig.port}/health`);
+    console.log(`🔍 Service discovery: http://localhost:${gatewayConfig.port}/services`);
+    
+  } else {
+    // Start monolithic application with all services integrated
+    console.log('🚀 Starting in monolith mode');
+    
+    const app = await createMicroserviceApp();
+    const PORT = process.env.PORT || 8000;
+    
+    app.listen(PORT, () => {
+      console.log(`🚀 AI Model Registry running on port ${PORT}`);
+      console.log(`📊 Health check: http://localhost:${PORT}/health`);
+      console.log(`🔗 API status: http://localhost:${PORT}/api/v1/status`);
+      console.log(`🔐 Auth endpoints: http://localhost:${PORT}/api/v1/auth`);
+      console.log(`📦 Model Registry: http://localhost:${PORT}/api/v1/models`);
+      console.log(`📋 Policy Engine: http://localhost:${PORT}/api/v1/policies`);
+      console.log(`🧪 Evaluation: http://localhost:${PORT}/api/v1/evaluations`);
+      console.log(`🚀 Deployment: http://localhost:${PORT}/api/v1/deployments`);
+      console.log(`📝 Audit: http://localhost:${PORT}/api/v1/audit`);
+    });
+  }
+}
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-  })
-})
+// Handle graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('🛑 Received SIGTERM, shutting down gracefully');
+  process.exit(0);
+});
 
-// API routes placeholder
-app.get('/api/v1/status', (req, res) => {
-  res.json({
-    message: 'AI Model Registry API is running',
-    version: '1.0.0',
-    timestamp: new Date().toISOString(),
-  })
-})
+process.on('SIGINT', () => {
+  console.log('🛑 Received SIGINT, shutting down gracefully');
+  process.exit(0);
+});
 
-// Error handling middleware
-app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error(err.stack)
-  res.status(500).json({
-    error: {
-      message: 'Internal Server Error',
-      ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
-    },
-  })
-})
-
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
-    error: {
-      message: 'Route not found',
-      path: req.originalUrl,
-    },
-  })
-})
-
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`)
-  console.log(`📊 Health check: http://localhost:${PORT}/health`)
-  console.log(`🔗 API status: http://localhost:${PORT}/api/v1/status`)
-})
+// Start the application
+startApplication().catch((error) => {
+  console.error('❌ Failed to start application:', error);
+  process.exit(1);
+});

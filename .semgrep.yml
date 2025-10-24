@@ -1,0 +1,111 @@
+rules:
+  - id: hardcoded-secret
+    pattern-either:
+      - pattern: |
+          $PASSWORD = "..."
+      - pattern: |
+          $API_KEY = "..."
+      - pattern: |
+          $SECRET = "..."
+      - pattern: |
+          $TOKEN = "..."
+    message: Potential hardcoded secret detected
+    languages: [typescript, javascript]
+    severity: ERROR
+    
+  - id: sql-injection-risk
+    pattern-either:
+      - pattern: |
+          $QUERY = "SELECT * FROM " + $USER_INPUT
+      - pattern: |
+          $QUERY = `SELECT * FROM ${$USER_INPUT}`
+      - pattern: |
+          db.query($QUERY + $USER_INPUT)
+    message: Potential SQL injection vulnerability
+    languages: [typescript, javascript]
+    severity: ERROR
+    
+  - id: unsafe-eval
+    pattern-either:
+      - pattern: eval($X)
+      - pattern: Function($X)
+      - pattern: new Function($X)
+    message: Use of eval() or Function() constructor is dangerous
+    languages: [typescript, javascript]
+    severity: ERROR
+    
+  - id: weak-crypto
+    pattern-either:
+      - pattern: crypto.createHash("md5")
+      - pattern: crypto.createHash("sha1")
+      - pattern: bcrypt.hash($X, 1)
+      - pattern: bcrypt.hash($X, 2)
+      - pattern: bcrypt.hash($X, 3)
+      - pattern: bcrypt.hash($X, 4)
+    message: Weak cryptographic algorithm or insufficient rounds
+    languages: [typescript, javascript]
+    severity: WARNING
+    
+  - id: insecure-random
+    pattern-either:
+      - pattern: Math.random()
+      - pattern: crypto.pseudoRandomBytes($X)
+    message: Use cryptographically secure random number generation
+    languages: [typescript, javascript]
+    severity: WARNING
+    
+  - id: unsafe-redirect
+    pattern-either:
+      - pattern: res.redirect($USER_INPUT)
+      - pattern: window.location = $USER_INPUT
+      - pattern: window.location.href = $USER_INPUT
+    message: Potential open redirect vulnerability
+    languages: [typescript, javascript]
+    severity: ERROR
+    
+  - id: missing-auth-check
+    pattern: |
+      app.$METHOD($PATH, ($REQ, $RES) => {
+        ...
+      })
+    pattern-not: |
+      app.$METHOD($PATH, $AUTH_MIDDLEWARE, ($REQ, $RES) => {
+        ...
+      })
+    message: Route missing authentication middleware
+    languages: [typescript, javascript]
+    severity: WARNING
+    paths:
+      include:
+        - "*/routes/*"
+        
+  - id: cors-wildcard
+    pattern-either:
+      - pattern: |
+          cors({
+            origin: "*"
+          })
+      - pattern: |
+          res.header("Access-Control-Allow-Origin", "*")
+    message: CORS configured with wildcard origin
+    languages: [typescript, javascript]
+    severity: WARNING
+    
+  - id: jwt-no-verify
+    pattern-either:
+      - pattern: jwt.decode($TOKEN)
+      - pattern: jwt.decode($TOKEN, { verify: false })
+    message: JWT token decoded without verification
+    languages: [typescript, javascript]
+    severity: ERROR
+    
+  - id: sensitive-data-log
+    pattern-either:
+      - pattern: console.log($X, $PASSWORD, $Y)
+      - pattern: console.log($X, $SECRET, $Y)
+      - pattern: console.log($X, $TOKEN, $Y)
+      - pattern: logger.info($X, $PASSWORD, $Y)
+      - pattern: logger.debug($X, $SECRET, $Y)
+    message: Potential sensitive data in logs
+    languages: [typescript, javascript]
+    severity: WARNING

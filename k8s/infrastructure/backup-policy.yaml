@@ -1,0 +1,218 @@
+# AWS Backup Configuration for AI Model Registry
+# This CloudFormation template sets up automated backups for Aurora and Redis
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS Backup configuration for AI Model Registry infrastructure'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [development, staging, production]
+    Description: Environment name
+  
+  AuroraClusterArn:
+    Type: String
+    Description: ARN of the Aurora cluster to backup
+  
+  RedisClusterArn:
+    Type: String
+    Description: ARN of the Redis cluster to backup
+
+Resources:
+  # Backup Vault
+  BackupVault:
+    Type: AWS::Backup::BackupVault
+    Properties:
+      BackupVaultName: !Sub '${AWS::StackName}-backup-vault'
+      EncryptionKeyArn: !GetAtt BackupKMSKey.Arn
+      BackupVaultTags:
+        Environment: !Ref Environment
+        Service: ai-model-registry
+
+  # KMS Key for Backup Encryption
+  BackupKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for AI Model Registry backups
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow AWS Backup
+            Effect: Allow
+            Principal:
+              Service: backup.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+              - kms:CreateGrant
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-backup-key'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # KMS Key Alias
+  BackupKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${AWS::StackName}-backup-key'
+      TargetKeyId: !Ref BackupKMSKey
+
+  # Backup Service Role
+  BackupServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: backup.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-backup-role'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Daily Backup Plan
+  DailyBackupPlan:
+    Type: AWS::Backup::BackupPlan
+    Properties:
+      BackupPlan:
+        BackupPlanName: !Sub '${AWS::StackName}-daily-backup'
+        BackupPlanRule:
+          - RuleName: DailyBackups
+            TargetBackupVault: !Ref BackupVault
+            ScheduleExpression: 'cron(0 2 * * ? *)'  # Daily at 2 AM UTC
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 120
+            Lifecycle:
+              DeleteAfterDays: 30
+              MoveToColdStorageAfterDays: 7
+            RecoveryPointTags:
+              BackupType: Daily
+              Environment: !Ref Environment
+          - RuleName: WeeklyBackups
+            TargetBackupVault: !Ref BackupVault
+            ScheduleExpression: 'cron(0 3 ? * SUN *)'  # Weekly on Sunday at 3 AM UTC
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 180
+            Lifecycle:
+              DeleteAfterDays: 90
+              MoveToColdStorageAfterDays: 30
+            RecoveryPointTags:
+              BackupType: Weekly
+              Environment: !Ref Environment
+      BackupPlanTags:
+        Environment: !Ref Environment
+        Service: ai-model-registry
+
+  # Backup Selection for Aurora
+  AuroraBackupSelection:
+    Type: AWS::Backup::BackupSelection
+    Properties:
+      BackupPlanId: !Ref DailyBackupPlan
+      BackupSelection:
+        SelectionName: !Sub '${AWS::StackName}-aurora-selection'
+        IamRoleArn: !GetAtt BackupServiceRole.Arn
+        Resources:
+          - !Ref AuroraClusterArn
+        Conditions:
+          StringEquals:
+            'aws:ResourceTag/Environment': !Ref Environment
+
+  # Backup Selection for Redis
+  RedisBackupSelection:
+    Type: AWS::Backup::BackupSelection
+    Properties:
+      BackupPlanId: !Ref DailyBackupPlan
+      BackupSelection:
+        SelectionName: !Sub '${AWS::StackName}-redis-selection'
+        IamRoleArn: !GetAtt BackupServiceRole.Arn
+        Resources:
+          - !Ref RedisClusterArn
+        Conditions:
+          StringEquals:
+            'aws:ResourceTag/Environment': !Ref Environment
+
+  # CloudWatch Alarms for Backup Monitoring
+  BackupFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-backup-failure'
+      AlarmDescription: Backup job failure alarm
+      MetricName: NumberOfBackupJobsFailed
+      Namespace: AWS/Backup
+      Statistic: Sum
+      Period: 86400  # 24 hours
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  # SNS Topic for Backup Notifications
+  BackupNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${AWS::StackName}-backup-notifications'
+      DisplayName: AI Model Registry Backup Notifications
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # CloudWatch Event Rule for Backup Job State Changes
+  BackupEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${AWS::StackName}-backup-events'
+      Description: Capture backup job state changes
+      EventPattern:
+        source:
+          - aws.backup
+        detail-type:
+          - Backup Job State Change
+        detail:
+          state:
+            - FAILED
+            - EXPIRED
+      State: ENABLED
+      Targets:
+        - Arn: !Ref BackupNotificationTopic
+          Id: BackupNotificationTarget
+
+Outputs:
+  BackupVaultName:
+    Description: Name of the backup vault
+    Value: !Ref BackupVault
+    Export:
+      Name: !Sub '${AWS::StackName}-backup-vault-name'
+  
+  BackupPlanId:
+    Description: ID of the backup plan
+    Value: !Ref DailyBackupPlan
+    Export:
+      Name: !Sub '${AWS::StackName}-backup-plan-id'
+  
+  BackupKMSKeyId:
+    Description: ID of the backup KMS key
+    Value: !Ref BackupKMSKey
+    Export:
+      Name: !Sub '${AWS::StackName}-backup-key-id'
+  
+  BackupNotificationTopicArn:
+    Description: ARN of the backup notification topic
+    Value: !Ref BackupNotificationTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-backup-topic-arn'

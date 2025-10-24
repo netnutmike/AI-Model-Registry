@@ -1,0 +1,829 @@
+openapi: 3.0.3
+info:
+  title: AI Model Registry API
+  description: |
+    Comprehensive API for the AI Model Registry platform that provides governance, 
+    risk management, and compliance controls for AI models throughout their lifecycle.
+    
+    ## Authentication
+    
+    All API endpoints require authentication via JWT tokens obtained through SSO login.
+    Include the token in the Authorization header:
+    
+    ```
+    Authorization: Bearer <jwt_token>
+    ```
+    
+    ## Error Handling
+    
+    The API uses standard HTTP status codes and returns error responses in the following format:
+    
+    ```json
+    {
+      "error": {
+        "code": "ERROR_CODE",
+        "message": "Human readable error message",
+        "details": {},
+        "traceId": "unique-trace-id"
+      }
+    }
+    ```
+    
+    ## Rate Limiting
+    
+    API requests are rate limited to 1000 requests per hour per user.
+    Rate limit headers are included in responses:
+    
+    - `X-RateLimit-Limit`: Request limit per hour
+    - `X-RateLimit-Remaining`: Remaining requests in current window
+    - `X-RateLimit-Reset`: Time when rate limit resets (Unix timestamp)
+    
+  version: 1.0.0
+  contact:
+    name: AI Model Registry Team
+    email: support@ai-model-registry.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.ai-model-registry.com/v1
+    description: Production server
+  - url: https://staging-api.ai-model-registry.com/v1
+    description: Staging server
+  - url: http://localhost:3000/api/v1
+    description: Local development server
+
+security:
+  - BearerAuth: []
+
+paths:
+  # Authentication endpoints
+  /auth/login/oidc:
+    get:
+      tags:
+        - Authentication
+      summary: Initiate OIDC SSO login
+      description: Redirects user to OIDC provider for authentication
+      responses:
+        '302':
+          description: Redirect to OIDC provider
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      security: []
+
+  /auth/login/saml:
+    get:
+      tags:
+        - Authentication
+      summary: Initiate SAML SSO login
+      description: Redirects user to SAML provider for authentication
+      responses:
+        '302':
+          description: Redirect to SAML provider
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      security: []
+
+  /auth/callback/oidc:
+    get:
+      tags:
+        - Authentication
+      summary: OIDC callback endpoint
+      description: Handles OIDC provider callback and issues JWT token
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      security: []
+
+  /auth/callback/saml:
+    post:
+      tags:
+        - Authentication
+      summary: SAML callback endpoint
+      description: Handles SAML provider callback and issues JWT token
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      security: []
+
+  /auth/logout:
+    post:
+      tags:
+        - Authentication
+      summary: Logout current session
+      description: Invalidates the current user session
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /auth/logout/all:
+    post:
+      tags:
+        - Authentication
+      summary: Logout all sessions
+      description: Invalidates all user sessions across devices
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /auth/refresh:
+    post:
+      tags:
+        - Authentication
+      summary: Refresh JWT token
+      description: Issues a new JWT token using the current session
+      responses:
+        '200':
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /auth/me:
+    get:
+      tags:
+        - Authentication
+      summary: Get current user profile
+      description: Returns the authenticated user's profile information
+      responses:
+        '200':
+          description: User profile retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/permissions/{resourceType}/{resourceId}:
+    get:
+      tags:
+        - Authentication
+      summary: Get user permissions for resource
+      description: Returns user permissions for a specific resource type and ID
+      parameters:
+        - name: resourceType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [models, users, deployments]
+        - name: resourceId
+          in: path
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Permissions retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PermissionsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # Model Registry endpoints
+  /models:
+    post:
+      tags:
+        - Model Registry
+      summary: Create a new model
+      description: Creates a new model with metadata and initial configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateModelRequest'
+      responses:
+        '201':
+          description: Model created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Model'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      tags:
+        - Model Registry
+      summary: Search and list models
+      description: Search models with filtering, sorting, and pagination
+      parameters:
+        - name: group
+          in: query
+          schema:
+            type: string
+          description: Filter by model group
+        - name: riskTier
+          in: query
+          schema:
+            $ref: '#/components/schemas/RiskTier'
+          description: Filter by risk tier
+        - name: tags
+          in: query
+          schema:
+            type: array
+            items:
+              type: string
+          description: Filter by tags
+        - name: owners
+          in: query
+          schema:
+            type: array
+            items:
+              type: string
+          description: Filter by owners
+        - name: state
+          in: query
+          schema:
+            $ref: '#/components/schemas/VersionState'
+          description: Filter by version state
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Full-text search query
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: Page number
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Number of items per page
+      responses:
+        '200':
+          description: Models retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelSearchResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /models/{modelId}:
+    get:
+      tags:
+        - Model Registry
+      summary: Get model by ID
+      description: Retrieves a specific model by its ID
+      parameters:
+        - name: modelId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Model retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Model'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags:
+        - Model Registry
+      summary: Update model
+      description: Updates model metadata and configuration
+      parameters:
+        - name: modelId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateModelRequest'
+      responses:
+        '200':
+          description: Model updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Model'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /models/{modelId}/versions:
+    post:
+      tags:
+        - Model Registry
+      summary: Create model version
+      description: Creates a new version of an existing model
+      parameters:
+        - name: modelId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVersionRequest'
+      responses:
+        '201':
+          description: Version created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelVersion'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      tags:
+        - Model Registry
+      summary: Get model versions
+      description: Retrieves all versions for a specific model
+      parameters:
+        - name: modelId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Versions retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ModelVersion'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    # Authentication schemas
+    LoginResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            token:
+              type: string
+              description: JWT access token
+            refreshToken:
+              type: string
+              description: Refresh token
+            expiresIn:
+              type: integer
+              description: Token expiration time in seconds
+            user:
+              $ref: '#/components/schemas/UserProfile'
+
+    TokenResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            token:
+              type: string
+            expiresIn:
+              type: integer
+
+    UserProfile:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            email:
+              type: string
+              format: email
+            name:
+              type: string
+            roles:
+              type: array
+              items:
+                $ref: '#/components/schemas/UserRole'
+            isActive:
+              type: boolean
+            lastLoginAt:
+              type: string
+              format: date-time
+
+    PermissionsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            resourceType:
+              type: string
+            resourceId:
+              type: string
+            permissions:
+              type: object
+              additionalProperties:
+                type: boolean
+
+    # Model Registry schemas
+    Model:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        group:
+          type: string
+        description:
+          type: string
+        owners:
+          type: array
+          items:
+            type: string
+            format: email
+        riskTier:
+          $ref: '#/components/schemas/RiskTier'
+        tags:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    ModelVersion:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        modelId:
+          type: string
+          format: uuid
+        version:
+          type: string
+          pattern: '^\d+\.\d+\.\d+$'
+        state:
+          $ref: '#/components/schemas/VersionState'
+        commitSha:
+          type: string
+          pattern: '^[a-f0-9]{40}$'
+        trainingJobId:
+          type: string
+        metadata:
+          $ref: '#/components/schemas/ModelMetadata'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateModelRequest:
+      type: object
+      required:
+        - name
+        - group
+        - description
+        - owners
+        - riskTier
+      properties:
+        name:
+          type: string
+          pattern: '^[a-zA-Z0-9\-_]+$'
+          minLength: 1
+          maxLength: 100
+        group:
+          type: string
+          pattern: '^[a-zA-Z0-9\-_]+$'
+          minLength: 1
+          maxLength: 50
+        description:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        owners:
+          type: array
+          items:
+            type: string
+            format: email
+          minItems: 1
+        riskTier:
+          $ref: '#/components/schemas/RiskTier'
+        tags:
+          type: array
+          items:
+            type: string
+            maxLength: 50
+
+    UpdateModelRequest:
+      type: object
+      minProperties: 1
+      properties:
+        description:
+          type: string
+          minLength: 1
+          maxLength: 1000
+        owners:
+          type: array
+          items:
+            type: string
+            format: email
+          minItems: 1
+        riskTier:
+          $ref: '#/components/schemas/RiskTier'
+        tags:
+          type: array
+          items:
+            type: string
+            maxLength: 50
+
+    CreateVersionRequest:
+      type: object
+      required:
+        - version
+        - commitSha
+        - metadata
+      properties:
+        version:
+          type: string
+          pattern: '^\d+\.\d+\.\d+$'
+        commitSha:
+          type: string
+          pattern: '^[a-f0-9]{40}$'
+        trainingJobId:
+          type: string
+          maxLength: 255
+        metadata:
+          $ref: '#/components/schemas/ModelMetadata'
+
+    ModelMetadata:
+      type: object
+      required:
+        - framework
+        - frameworkVersion
+        - modelType
+      properties:
+        framework:
+          type: string
+        frameworkVersion:
+          type: string
+        modelType:
+          type: string
+        inputSchema:
+          type: object
+        outputSchema:
+          type: object
+        hyperparameters:
+          type: object
+        trainingDataset:
+          type: string
+        baseModel:
+          type: string
+        intendedUse:
+          type: string
+        limitations:
+          type: string
+        ethicalConsiderations:
+          type: string
+
+    ModelSearchResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          properties:
+            models:
+              type: array
+              items:
+                $ref: '#/components/schemas/Model'
+            pagination:
+              $ref: '#/components/schemas/PaginationInfo'
+
+    PaginationInfo:
+      type: object
+      properties:
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        totalItems:
+          type: integer
+        totalPages:
+          type: integer
+        hasNext:
+          type: boolean
+        hasPrevious:
+          type: boolean
+
+    # Enums
+    UserRole:
+      type: string
+      enum:
+        - MODEL_OWNER
+        - MRC
+        - SECURITY_ARCHITECT
+        - SRE
+        - AUDITOR
+        - ADMIN
+
+    RiskTier:
+      type: string
+      enum:
+        - LOW
+        - MEDIUM
+        - HIGH
+
+    VersionState:
+      type: string
+      enum:
+        - DRAFT
+        - SUBMITTED
+        - CHANGES_REQUESTED
+        - APPROVED_STAGING
+        - STAGING
+        - APPROVED_PROD
+        - PRODUCTION
+        - DEPRECATED
+        - RETIRED
+
+    ArtifactType:
+      type: string
+      enum:
+        - WEIGHTS
+        - CONTAINER
+        - TOKENIZER
+        - CONFIG
+
+    # Common response schemas
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+            traceId:
+              type: string
+
+  responses:
+    BadRequest:
+      description: Bad request - invalid input data
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Unauthorized:
+      description: Unauthorized - authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Forbidden:
+      description: Forbidden - insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    Conflict:
+      description: Conflict - resource already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+tags:
+  - name: Authentication
+    description: User authentication and authorization
+  - name: Model Registry
+    description: Model and version management
+  - name: Policy Engine
+    description: Governance policies and compliance
+  - name: Evaluation
+    description: Model evaluation and testing
+  - name: Deployment
+    description: Model deployment and monitoring
+  - name: Audit
+    description: Audit logs and compliance reporting

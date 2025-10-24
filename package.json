@@ -14,7 +14,10 @@
     "build": "npm run build --workspaces",
     "test": "npm run test --workspaces",
     "lint": "npm run lint --workspaces",
-    "clean": "npm run clean --workspaces && rm -rf node_modules"
+    "clean": "npm run clean --workspaces && rm -rf node_modules",
+    "security:scan": "./scripts/security-scan.sh",
+    "security:audit": "npm audit --audit-level=moderate --workspaces",
+    "security:licenses": "license-checker --summary --onlyAllow 'MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;0BSD'"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
