@@ -1,0 +1,36 @@
+{
+  "name": "ai-model-registry-k8s-tests",
+  "version": "1.0.0",
+  "description": "Infrastructure tests for AI Model Registry Kubernetes deployment",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha --timeout 300000 --recursive .",
+    "test:deployment": "mocha --timeout 300000 deployment-validation.test.js",
+    "test:database": "mocha --timeout 300000 database-connectivity.test.js",
+    "test:monitoring": "mocha --timeout 300000 monitoring-validation.test.js",
+    "test:ci": "mocha --timeout 300000 --reporter json --recursive . > test-results.json"
+  },
+  "keywords": [
+    "kubernetes",
+    "infrastructure",
+    "testing",
+    "ai-model-registry"
+  ],
+  "author": "AI Model Registry Team",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.5.0",
+    "chai": "^4.3.8",
+    "mocha": "^10.2.0",
+    "pg": "^8.11.3",
+    "redis": "^4.6.8"
+  },
+  "devDependencies": {
+    "@types/chai": "^4.3.6",
+    "@types/mocha": "^10.0.1",
+    "@types/node": "^20.5.9"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

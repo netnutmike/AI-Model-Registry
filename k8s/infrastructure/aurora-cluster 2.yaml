@@ -1,0 +1,270 @@
+# Aurora PostgreSQL Cluster Configuration
+# This is a CloudFormation template for AWS Aurora PostgreSQL
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Aurora PostgreSQL cluster for AI Model Registry'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [development, staging, production]
+    Description: Environment name
+  
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where the cluster will be deployed
+  
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnet IDs for the database cluster
+  
+  DatabaseName:
+    Type: String
+    Default: ai_model_registry
+    Description: Name of the database to create
+  
+  MasterUsername:
+    Type: String
+    Default: postgres
+    Description: Master username for the database
+  
+  MasterUserPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 128
+    Description: Master password for the database (stored in Secrets Manager)
+  
+  InstanceClass:
+    Type: String
+    Default: db.r6g.large
+    AllowedValues:
+      - db.r6g.large
+      - db.r6g.xlarge
+      - db.r6g.2xlarge
+      - db.r6g.4xlarge
+    Description: Instance class for Aurora instances
+  
+  BackupRetentionPeriod:
+    Type: Number
+    Default: 7
+    MinValue: 1
+    MaxValue: 35
+    Description: Number of days to retain automated backups
+
+Resources:
+  # Database Subnet Group
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for Aurora PostgreSQL cluster
+      SubnetIds: !Ref PrivateSubnetIds
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-db-subnet-group'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Security Group for Aurora Cluster
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Aurora PostgreSQL cluster
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref ApplicationSecurityGroup
+          Description: PostgreSQL access from application
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-db-sg'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Security Group for Applications
+  ApplicationSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for applications accessing the database
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-app-sg'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Parameter Group for Aurora PostgreSQL
+  DBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: Parameter group for Aurora PostgreSQL cluster
+      Family: aurora-postgresql14
+      Parameters:
+        shared_preload_libraries: pg_stat_statements
+        log_statement: all
+        log_min_duration_statement: 1000
+        log_checkpoints: 1
+        log_connections: 1
+        log_disconnections: 1
+        log_lock_waits: 1
+        log_temp_files: 0
+        track_activity_query_size: 2048
+        pg_stat_statements.track: all
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-db-params'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Cluster Parameter Group
+  DBClusterParameterGroup:
+    Type: AWS::RDS::DBClusterParameterGroup
+    Properties:
+      Description: Cluster parameter group for Aurora PostgreSQL
+      Family: aurora-postgresql14
+      Parameters:
+        log_statement: all
+        log_min_duration_statement: 1000
+        shared_preload_libraries: pg_stat_statements
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-cluster-params'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Secrets Manager Secret for Database Credentials
+  DatabaseSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${AWS::StackName}-db-credentials'
+      Description: Database credentials for Aurora PostgreSQL cluster
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "${MasterUsername}"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-db-secret'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Aurora PostgreSQL Cluster
+  DatabaseCluster:
+    Type: AWS::RDS::DBCluster
+    DeletionPolicy: Snapshot
+    Properties:
+      DBClusterIdentifier: !Sub '${AWS::StackName}-aurora-cluster'
+      Engine: aurora-postgresql
+      EngineVersion: '14.9'
+      DatabaseName: !Ref DatabaseName
+      MasterUsername: !Ref MasterUsername
+      ManageMasterUserPassword: true
+      MasterUserSecret:
+        SecretArn: !Ref DatabaseSecret
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VpcSecurityGroupIds:
+        - !Ref DatabaseSecurityGroup
+      DBClusterParameterGroupName: !Ref DBClusterParameterGroup
+      BackupRetentionPeriod: !Ref BackupRetentionPeriod
+      PreferredBackupWindow: '03:00-04:00'
+      PreferredMaintenanceWindow: 'sun:04:00-sun:05:00'
+      EnableCloudwatchLogsExports:
+        - postgresql
+      DeletionProtection: true
+      StorageEncrypted: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-aurora-cluster'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Primary Aurora Instance
+  DatabasePrimaryInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub '${AWS::StackName}-aurora-primary'
+      DBClusterIdentifier: !Ref DatabaseCluster
+      DBInstanceClass: !Ref InstanceClass
+      Engine: aurora-postgresql
+      DBParameterGroupName: !Ref DBParameterGroup
+      PubliclyAccessible: false
+      MonitoringInterval: 60
+      MonitoringRoleArn: !GetAtt EnhancedMonitoringRole.Arn
+      PerformanceInsightsEnabled: true
+      PerformanceInsightsRetentionPeriod: 7
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-aurora-primary'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Read Replica Aurora Instance
+  DatabaseReplicaInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: !Sub '${AWS::StackName}-aurora-replica'
+      DBClusterIdentifier: !Ref DatabaseCluster
+      DBInstanceClass: !Ref InstanceClass
+      Engine: aurora-postgresql
+      DBParameterGroupName: !Ref DBParameterGroup
+      PubliclyAccessible: false
+      MonitoringInterval: 60
+      MonitoringRoleArn: !GetAtt EnhancedMonitoringRole.Arn
+      PerformanceInsightsEnabled: true
+      PerformanceInsightsRetentionPeriod: 7
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-aurora-replica'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Enhanced Monitoring Role
+  EnhancedMonitoringRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: monitoring.rds.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole'
+      Path: /
+
+Outputs:
+  ClusterEndpoint:
+    Description: Aurora cluster endpoint
+    Value: !GetAtt DatabaseCluster.Endpoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}-cluster-endpoint'
+  
+  ReaderEndpoint:
+    Description: Aurora cluster reader endpoint
+    Value: !GetAtt DatabaseCluster.ReadEndpoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}-reader-endpoint'
+  
+  DatabaseName:
+    Description: Database name
+    Value: !Ref DatabaseName
+    Export:
+      Name: !Sub '${AWS::StackName}-database-name'
+  
+  DatabaseSecretArn:
+    Description: Database credentials secret ARN
+    Value: !Ref DatabaseSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-secret-arn'
+  
+  ApplicationSecurityGroupId:
+    Description: Security group ID for applications
+    Value: !Ref ApplicationSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-app-sg-id'

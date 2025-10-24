@@ -1,0 +1,366 @@
+# Disaster Recovery Configuration for AI Model Registry
+# This includes cross-region replication and recovery procedures
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Disaster Recovery setup for AI Model Registry'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [development, staging, production]
+    Description: Environment name
+  
+  PrimaryRegion:
+    Type: String
+    Default: us-west-2
+    Description: Primary AWS region
+  
+  DRRegion:
+    Type: String
+    Default: us-east-1
+    Description: Disaster recovery AWS region
+  
+  S3BucketName:
+    Type: String
+    Description: Name of the S3 bucket for model artifacts
+  
+  AuroraClusterIdentifier:
+    Type: String
+    Description: Identifier of the primary Aurora cluster
+
+Resources:
+  # Cross-Region S3 Replication Role
+  S3ReplicationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: s3.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3ReplicationPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObjectVersionForReplication
+                  - s3:GetObjectVersionAcl
+                  - s3:GetObjectVersionTagging
+                Resource: !Sub '${S3BucketName}/*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !Ref S3BucketName
+              - Effect: Allow
+                Action:
+                  - s3:ReplicateObject
+                  - s3:ReplicateDelete
+                  - s3:ReplicateTags
+                Resource: !Sub '${S3BucketName}-dr/*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-s3-replication-role'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # DR Region S3 Bucket (for cross-region replication)
+  DRS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${S3BucketName}-dr'
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+          - Id: TransitionToIA
+            Status: Enabled
+            Transition:
+              StorageClass: STANDARD_IA
+              TransitionInDays: 30
+          - Id: TransitionToGlacier
+            Status: Enabled
+            Transition:
+              StorageClass: GLACIER
+              TransitionInDays: 90
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-dr-bucket'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Aurora Global Database (Cross-Region Read Replica)
+  AuroraGlobalCluster:
+    Type: AWS::RDS::GlobalCluster
+    Properties:
+      GlobalClusterIdentifier: !Sub '${AWS::StackName}-global-cluster'
+      SourceDBClusterIdentifier: !Ref AuroraClusterIdentifier
+      Engine: aurora-postgresql
+      EngineVersion: '14.9'
+      StorageEncrypted: true
+
+  # Lambda Function for DR Orchestration
+  DROrchestrationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-dr-orchestration'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt DRLambdaRole.Arn
+      Timeout: 900
+      Environment:
+        Variables:
+          PRIMARY_REGION: !Ref PrimaryRegion
+          DR_REGION: !Ref DRRegion
+          GLOBAL_CLUSTER_ID: !Ref AuroraGlobalCluster
+          S3_BUCKET: !Ref S3BucketName
+          DR_S3_BUCKET: !Ref DRS3Bucket
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import os
+          
+          def lambda_handler(event, context):
+              """
+              DR Orchestration Lambda Function
+              Handles failover procedures for Aurora and application components
+              """
+              
+              primary_region = os.environ['PRIMARY_REGION']
+              dr_region = os.environ['DR_REGION']
+              global_cluster_id = os.environ['GLOBAL_CLUSTER_ID']
+              
+              # Initialize AWS clients
+              rds_primary = boto3.client('rds', region_name=primary_region)
+              rds_dr = boto3.client('rds', region_name=dr_region)
+              
+              action = event.get('action', 'status')
+              
+              if action == 'failover':
+                  return perform_failover(rds_primary, rds_dr, global_cluster_id)
+              elif action == 'failback':
+                  return perform_failback(rds_primary, rds_dr, global_cluster_id)
+              elif action == 'status':
+                  return get_dr_status(rds_primary, rds_dr, global_cluster_id)
+              else:
+                  return {
+                      'statusCode': 400,
+                      'body': json.dumps({'error': 'Invalid action'})
+                  }
+          
+          def perform_failover(rds_primary, rds_dr, global_cluster_id):
+              """Perform failover to DR region"""
+              try:
+                  # Promote secondary cluster to primary
+                  response = rds_dr.failover_global_cluster(
+                      GlobalClusterIdentifier=global_cluster_id,
+                      TargetDbClusterIdentifier=f"{global_cluster_id}-dr"
+                  )
+                  
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps({
+                          'message': 'Failover initiated successfully',
+                          'response': response
+                      })
+                  }
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': str(e)})
+                  }
+          
+          def perform_failback(rds_primary, rds_dr, global_cluster_id):
+              """Perform failback to primary region"""
+              try:
+                  # Failback to primary region
+                  response = rds_primary.failover_global_cluster(
+                      GlobalClusterIdentifier=global_cluster_id,
+                      TargetDbClusterIdentifier=f"{global_cluster_id}-primary"
+                  )
+                  
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps({
+                          'message': 'Failback initiated successfully',
+                          'response': response
+                      })
+                  }
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': str(e)})
+                  }
+          
+          def get_dr_status(rds_primary, rds_dr, global_cluster_id):
+              """Get DR status"""
+              try:
+                  # Get global cluster status
+                  response = rds_primary.describe_global_clusters(
+                      GlobalClusterIdentifier=global_cluster_id
+                  )
+                  
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps({
+                          'status': response['GlobalClusters'][0]['Status'],
+                          'members': response['GlobalClusters'][0]['GlobalClusterMembers']
+                      })
+                  }
+              except Exception as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': str(e)})
+                  }
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-dr-function'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # IAM Role for DR Lambda Function
+  DRLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DROrchestrationPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds:DescribeGlobalClusters
+                  - rds:FailoverGlobalCluster
+                  - rds:DescribeDBClusters
+                  - rds:ModifyGlobalCluster
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  - !Sub '${S3BucketName}/*'
+                  - !Sub '${DRS3Bucket}/*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-dr-lambda-role'
+        - Key: Environment
+          Value: !Ref Environment
+
+  # CloudWatch Alarm for RTO/RPO Monitoring
+  DRRTOAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-dr-rto-breach'
+      AlarmDescription: DR RTO breach alarm
+      MetricName: DatabaseConnections
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 8  # 40 minutes (RTO target: 4 hours)
+      Threshold: 0
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: DBClusterIdentifier
+          Value: !Ref AuroraClusterIdentifier
+      TreatMissingData: breaching
+
+  # SNS Topic for DR Notifications
+  DRNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${AWS::StackName}-dr-notifications'
+      DisplayName: AI Model Registry DR Notifications
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # CloudWatch Event Rule for DR Events
+  DREventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${AWS::StackName}-dr-events'
+      Description: Capture DR-related events
+      EventPattern:
+        source:
+          - aws.rds
+        detail-type:
+          - RDS DB Cluster Event
+        detail:
+          EventCategories:
+            - failover
+            - failure
+      State: ENABLED
+      Targets:
+        - Arn: !Ref DRNotificationTopic
+          Id: DRNotificationTarget
+        - Arn: !GetAtt DROrchestrationFunction.Arn
+          Id: DROrchestrationTarget
+
+  # Lambda Permission for CloudWatch Events
+  DRLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DROrchestrationFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DREventRule.Arn
+
+Outputs:
+  DRBucketName:
+    Description: Name of the DR S3 bucket
+    Value: !Ref DRS3Bucket
+    Export:
+      Name: !Sub '${AWS::StackName}-dr-bucket-name'
+  
+  GlobalClusterIdentifier:
+    Description: Global cluster identifier
+    Value: !Ref AuroraGlobalCluster
+    Export:
+      Name: !Sub '${AWS::StackName}-global-cluster-id'
+  
+  DROrchestrationFunctionArn:
+    Description: ARN of the DR orchestration function
+    Value: !GetAtt DROrchestrationFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-dr-function-arn'
+  
+  DRNotificationTopicArn:
+    Description: ARN of the DR notification topic
+    Value: !Ref DRNotificationTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-dr-topic-arn'

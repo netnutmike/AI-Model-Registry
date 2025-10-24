@@ -1,0 +1,96 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: ai-model-registry
+data:
+  ai-model-registry.yml: |
+    groups:
+      - name: ai-model-registry.rules
+        rules:
+          # High-level availability alerts
+          - alert: ServiceDown
+            expr: up{job=~"ai-model-registry-.*"} == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "AI Model Registry service is down"
+              description: "Service {{ $labels.job }} has been down for more than 1 minute."
+          
+          # Response time alerts
+          - alert: HighResponseTime
+            expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job=~"ai-model-registry-.*"}[5m])) > 1
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High response time detected"
+              description: "95th percentile response time is {{ $value }}s for service {{ $labels.job }}"
+          
+          # Error rate alerts
+          - alert: HighErrorRate
+            expr: rate(http_requests_total{job=~"ai-model-registry-.*",status=~"5.."}[5m]) / rate(http_requests_total{job=~"ai-model-registry-.*"}[5m]) > 0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High error rate detected"
+              description: "Error rate is {{ $value | humanizePercentage }} for service {{ $labels.job }}"
+          
+          # Resource utilization alerts
+          - alert: HighCPUUsage
+            expr: rate(container_cpu_usage_seconds_total{namespace="ai-model-registry"}[5m]) * 100 > 80
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High CPU usage detected"
+              description: "CPU usage is {{ $value }}% for container {{ $labels.container }} in pod {{ $labels.pod }}"
+          
+          - alert: HighMemoryUsage
+            expr: container_memory_usage_bytes{namespace="ai-model-registry"} / container_spec_memory_limit_bytes * 100 > 80
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High memory usage detected"
+              description: "Memory usage is {{ $value }}% for container {{ $labels.container }} in pod {{ $labels.pod }}"
+          
+          # Database connection alerts
+          - alert: DatabaseConnectionFailure
+            expr: increase(database_connection_errors_total{job=~"ai-model-registry-.*"}[5m]) > 5
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Database connection failures detected"
+              description: "{{ $value }} database connection failures in the last 5 minutes for service {{ $labels.job }}"
+          
+          # Model registry specific alerts
+          - alert: ModelRegistrationFailure
+            expr: increase(model_registration_failures_total[5m]) > 3
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Model registration failures detected"
+              description: "{{ $value }} model registration failures in the last 5 minutes"
+          
+          - alert: PolicyEvaluationFailure
+            expr: increase(policy_evaluation_failures_total[5m]) > 5
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Policy evaluation failures detected"
+              description: "{{ $value }} policy evaluation failures in the last 5 minutes"
+          
+          - alert: EvaluationJobFailure
+            expr: increase(evaluation_job_failures_total[5m]) > 2
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Evaluation job failures detected"
+              description: "{{ $value }} evaluation job failures in the last 5 minutes"
